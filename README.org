@@ -5,9 +5,9 @@ Defmodel is a Common Lisp package that is for quickly simulating a set
 of differential equations in order to quickly sketch the behavior of
 the system without investing too much time implementing a
 simulation. As an example of using defmodel, consider the Lorenz
-system
+system.
 
-#+html: <p align="center"><img src="images/lorenz-equations.png" width="400" /></p>
+#+html: <p align="center"><img src="images/lorenz-equations.png" /></p>
 
 In order to simulate this system, the ~defmodel~ form can be used by
 directly translating the Lorenz system into Common Lisp expressions.
