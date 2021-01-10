@@ -1,0 +1,207 @@
+
+* Defmodel: Macros for Simulating Dynamical Systems
+
+Defmodel is a Common Lisp package that is for quickly simulating a set
+of differential equations in order to quickly sketch the behavior of
+the system without investing too much time implementing a
+simulation. As an example of using defmodel, consider the Lorenz
+system
+
+#+html: <p align="center"><img src="images/lorenz-equations.png" width="400" /></p>
+
+In order to simulate this system, the ~defmodel~ form can be used by
+directly translating the Lorenz system into Common Lisp expressions.
+
+#+begin_src lisp
+(defmodel lorenz-system (x y z)
+  (dx-wrt-dt (* sigma (- y x)))
+  (dy-wrt-dt (- (* x (- rho z)) y))
+  (dz-wrt-dt (- (* x y) (* beta z))))
+#+end_src
+
+There are three parameters that determine the behavior of the system:
+~sigma~, ~rho~, and ~beta~. A new class can be constructed where these
+constants are defined using the ~defparameter~ form. Here, the new
+class is named ~lorenz-system-chaotic~ because chaotic behavior is
+expected from this choice of parameter values.
+
+#+begin_src lisp
+(defprofile chaotic lorenz-system
+  (rho 28.0)
+  (sigma 10.0)
+  (beta 8/3))
+#+end_src
+
+Finally, an instance of this system can be simulated by making an
+instance of an object from the class ~lorenz-system-chaotic~ with the
+initial conditions wanted. To march the object forward in time by the
+increment defined by the ~time-step~ slot (which can be changed from
+its default value of 0.01 when initializing the object), use the
+~update-model-object~ function. To open the data file where the state
+of the object is to be outputted to, use the function
+~open-model-object~. To print the current state of the object out to
+the file, use the ~output-model-object-state~ function. Finally, when
+the simulation is complete, close the file using
+~close-model-object~. An example run of the simulation would look like
+the following function.
+
+#+begin_src lisp
+(defun output-lorenz-attractor ()
+  "Simulates the Lorenz system in a chaotic regime."
+  (let ((obj (make-instance 'lorenz-system-chaotic ;; make the simulation object
+			    :x 2.0
+			    :y 2.0
+			    :z 2.0
+			    :id 'lorenz)))
+    (loop :repeat 10000 :do (update-model-object obj)) ;; simulate past the transient
+    (open-model-object obj) ;; open the data file labeled via the id slot
+    (loop :repeat 5000 :do ;; simulate for time-step x 5000
+      (output-model-object-state obj)  ;; print the current state to the data file
+      (update-model-object obj)) ;; update the object one time-step
+    (close-model-object obj))) ;; finally, close the data file
+#+end_src
+
+By executing the function via ~(output-lorenz-attractor)~, a data file
+~LORENZ.dat~ is created that contains information about the system at
+each time step after the transient period. The following graph is a
+visualization of this result.
+
+#+html: <p align="center"><img src="example/lorenz.png" width="400" /></p>
+
+** Macroexpansion of the Defmodel form
+
+#+begin_src lisp
+  (PROGN
+    (DEFCLASS LORENZ-SYSTEM (MODEL-OBJECT)
+      ((BETA :INITARG :BETA) (RHO :INITARG :RHO) (SIGMA :INITARG :SIGMA)
+       (Z :INITARG :Z) (Y :INITARG :Y) (X :INITARG :X)))
+
+    (DEFMETHOD LORENZ-SYSTEM-DX-WRT-DT
+	((MODEL-OBJECT LORENZ-SYSTEM) CURRENT-TIME X Y Z
+	 &OPTIONAL LINKED-MODEL-OBJECTS)
+      (DECLARE (IGNORE LINKED-MODEL-OBJECTS))
+      (WITH-SLOTS (SIGMA RHO BETA)
+	  MODEL-OBJECT
+	(* SIGMA (- Y X))))
+
+    (DEFMETHOD LORENZ-SYSTEM-DY-WRT-DT
+	((MODEL-OBJECT LORENZ-SYSTEM) CURRENT-TIME X Y Z
+	 &OPTIONAL LINKED-MODEL-OBJECTS)
+      (DECLARE (IGNORE LINKED-MODEL-OBJECTS))
+      (WITH-SLOTS (SIGMA RHO BETA)
+	  MODEL-OBJECT
+	(- (* X (- RHO Z)) Y)))
+
+    (DEFMETHOD LORENZ-SYSTEM-DZ-WRT-DT
+	((MODEL-OBJECT LORENZ-SYSTEM) CURRENT-TIME X Y Z
+	 &OPTIONAL LINKED-MODEL-OBJECTS)
+      (DECLARE (IGNORE LINKED-MODEL-OBJECTS))
+      (WITH-SLOTS (SIGMA RHO BETA)
+	  MODEL-OBJECT
+	(- (* X Y) (* BETA Z))))
+
+    (DEFMETHOD OPEN-MODEL-OBJECT ((MODEL-OBJECT LORENZ-SYSTEM) &KEY FILENAME)
+      (WITH-SLOTS (ID OUTPUT-STREAM)
+	  MODEL-OBJECT
+	(LET* ((FNAME
+		 (IF (NULL FILENAME)
+		     (CONCATENATE 'STRING (WRITE-TO-STRING ID) ".dat")
+		     FILENAME)))
+	  (SETF OUTPUT-STREAM
+		(OPEN FNAME :DIRECTION :OUTPUT :IF-DOES-NOT-EXIST :CREATE
+			    :IF-EXISTS :SUPERSEDE)))))
+
+    (DEFMETHOD CLOSE-MODEL-OBJECT ((MODEL-OBJECT LORENZ-SYSTEM))
+      (WITH-SLOTS (OUTPUT-STREAM)
+	  MODEL-OBJECT
+	(CLOSE OUTPUT-STREAM)))
+
+    (DEFMETHOD UPDATE-MODEL-OBJECT
+	((MODEL-OBJECT LORENZ-SYSTEM) &OPTIONAL LINKED-MODEL-OBJECTS)
+      (WITH-SLOTS (X Y Z SIGMA RHO BETA CURRENT-TIME TIME-STEP)
+	  MODEL-OBJECT
+	(PROGN
+	  (LET* ((K1
+		   (VECTOR
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DX-WRT-DT MODEL-OBJECT CURRENT-TIME X Y Z
+						LINKED-MODEL-OBJECTS))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DY-WRT-DT MODEL-OBJECT CURRENT-TIME X Y Z
+						LINKED-MODEL-OBJECTS))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DZ-WRT-DT MODEL-OBJECT CURRENT-TIME X Y Z
+						LINKED-MODEL-OBJECTS))))
+		 (K2
+		   (VECTOR
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DX-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K1 0) 2.0)) (+ Y (/ (SVREF K1 1) 2.0))
+						(+ Z (/ (SVREF K1 2) 2.0))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DY-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K1 0) 2.0)) (+ Y (/ (SVREF K1 1) 2.0))
+						(+ Z (/ (SVREF K1 2) 2.0))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DZ-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K1 0) 2.0)) (+ Y (/ (SVREF K1 1) 2.0))
+						(+ Z (/ (SVREF K1 2) 2.0))))))
+		 (K3
+		   (VECTOR
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DX-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K2 0) 2.0)) (+ Y (/ (SVREF K2 1) 2.0))
+						(+ Z (/ (SVREF K2 2) 2.0))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DY-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K2 0) 2.0)) (+ Y (/ (SVREF K2 1) 2.0))
+						(+ Z (/ (SVREF K2 2) 2.0))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DZ-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME (/ TIME-STEP 2.0))
+						(+ X (/ (SVREF K2 0) 2.0)) (+ Y (/ (SVREF K2 1) 2.0))
+						(+ Z (/ (SVREF K2 2) 2.0))))))
+		 (K4
+		   (VECTOR
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DX-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME TIME-STEP) (+ X (SVREF K3 0))
+						(+ Y (SVREF K3 1)) (+ Z (SVREF K3 2))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DY-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME TIME-STEP) (+ X (SVREF K3 0))
+						(+ Y (SVREF K3 1)) (+ Z (SVREF K3 2))))
+		    (* TIME-STEP
+		       (LORENZ-SYSTEM-DZ-WRT-DT MODEL-OBJECT
+						(+ CURRENT-TIME TIME-STEP) (+ X (SVREF K3 0))
+						(+ Y (SVREF K3 1)) (+ Z (SVREF K3 2)))))))
+	    (SETF X
+		  (+ X (/ (SVREF K1 0) 6.0) (/ (SVREF K2 0) 3.0)
+		     (/ (SVREF K3 0) 3.0) (/ (SVREF K4 0) 6.0)))
+	    (SETF Y
+		  (+ Y (/ (SVREF K1 1) 6.0) (/ (SVREF K2 1) 3.0)
+		     (/ (SVREF K3 1) 3.0) (/ (SVREF K4 1) 6.0)))
+	    (SETF Z
+		  (+ Z (/ (SVREF K1 2) 6.0) (/ (SVREF K2 2) 3.0)
+		     (/ (SVREF K3 2) 3.0) (/ (SVREF K4 2) 6.0))))
+	  (INCF CURRENT-TIME TIME-STEP))
+	T))
+
+    (DEFMETHOD OUTPUT-MODEL-OBJECT-STATE ((MODEL-OBJECT LORENZ-SYSTEM))
+      (WITH-SLOTS (X Y Z CURRENT-TIME OUTPUT-STREAM)
+	  MODEL-OBJECT
+	(FORMAT OUTPUT-STREAM "~A ~A ~A ~A ~%" CURRENT-TIME X Y Z))))
+#+end_src
+
+** Macroexpansion of the Defprofile form
+#+begin_src lisp
+(DEFCLASS LORENZ-SYSTEM-CHAOTIC (LORENZ-SYSTEM)
+          ((RHO :INITFORM 28.0 :ALLOCATION :CLASS)
+           (SIGMA :INITFORM 10.0 :ALLOCATION :CLASS)
+           (BETA :INITFORM 8/3 :ALLOCATION :CLASS)))
+#+end_src
